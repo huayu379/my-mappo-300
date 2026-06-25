@@ -41,9 +41,10 @@ if os.path.exists(log_file):
 
 # 日志记录函数
 def log_message(message):
-    with open(log_file, "a") as f:
-        f.write(message + "\n")
+    with open(log_file, "a") as f: # 以追加模式打开日志文件。
+        f.write(message + "\n") # 把 message 写入日志文件，并换行。
 
+# 定义画图函数
 def plot_all_metrics(metrics_dict, episode):
     """
     将所有指标绘制到一个包含多个子图的图表中
@@ -55,14 +56,14 @@ def plot_all_metrics(metrics_dict, episode):
     """
     # 创建一个2x3的子图布局
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    fig.suptitle(f'Training Metrics of {env_name} (Up to Episode {episode})', fontsize=16)
+    fig.suptitle(f'Training Metrics of {env_name} (Up to Episode {episode})', fontsize=16) # 设置整张图的大标题。
     
     # 压平axes数组以便迭代
     axes = axes.flatten()
     
     # 为每个指标获取x轴值
-    any_metric = list(metrics_dict.values())[0]
-    x_values = [50 * (i + 1) for i in range(len(any_metric))]
+    any_metric = list(metrics_dict.values())[0] # 拿到字典里的第一个指标列表。
+    x_values = [50 * (i + 1) for i in range(len(any_metric))] # 横坐标是 episode 数。50, 100, 150, 200, ...
     
     # 平滑参数 - 窗口大小
     window_size = min(5, len(x_values)) if len(x_values) > 0 else 1
@@ -111,25 +112,28 @@ def plot_all_metrics(metrics_dict, episode):
         fig.delaxes(axes[5])
     
     plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.savefig(os.path.join(plots_dir, f'training_metrics.png'))
+    plt.savefig(os.path.join(plots_dir, f'training_metrics.png')) # 把图保存到：results/simple_spread_v3/plots/training_metrics.png
     plt.close(fig)
 
-def compute_entropy(probs):
-    dist = torch.distributions.Categorical(probs)
-    return dist.entropy().mean().item()
+# 计算策略熵
+def compute_entropy(probs): # 参数 probs 是 actor 输出的动作概率。
+    dist = torch.distributions.Categorical(probs) # 创建一个离散分布。
+    return dist.entropy().mean().item() # 计算熵，并取平均值，再转成普通 Python 数字。熵大，策略更随机，探索更多
 
-def compute_advantage(gamma, lmbda, td_delta):
-    td_delta = td_delta.detach().cpu().numpy()
-    advantage_list = []
-    advantage = 0.0
+# 计算优势函数 Advantage
+def compute_advantage(gamma, lmbda, td_delta): # 折扣因子，GAE衰减系数，TD误差序列
+    td_delta = td_delta.detach().cpu().numpy() # 把 PyTorch 张量从计算图中分离出来，并转到 CPU，再转成 NumPy 数组。
+    advantage_list = [] # 创建一个空列表，用来保存每个时间步的优势值。
+    advantage = 0.0 # 初始化优势为 0。
     for delta in td_delta[::-1]:
-        advantage = gamma * lmbda * advantage + delta
-        advantage_list.append(advantage)
-    advantage_list.reverse()
-    return torch.tensor(advantage_list, dtype=torch.float)
+        advantage = gamma * lmbda * advantage + delta # 当前优势 = 当前 TD 误差 + 衰减后的未来优势
+        advantage_list.append(advantage) # 把当前算出的优势存进去。
+    advantage_list.reverse() # 因为前面是倒序计算的，所以这里再反转回来，让时间顺序恢复为：t = 0, 1, 2, ...
+    return torch.tensor(advantage_list, dtype=torch.float) # 返回 PyTorch 张量。
 
 
 # 策略网络(Actor)
+# 输入状态s，输出动作概率
 class PolicyNet(torch.nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super(PolicyNet, self).__init__()
@@ -138,8 +142,8 @@ class PolicyNet(torch.nn.Module):
         self.fc3 = torch.nn.Linear(hidden_dim, action_dim)
 
     def forward(self, x):
-        x = F.relu(self.fc2(F.relu(self.fc1(x))))
-        return F.softmax(self.fc3(x), dim=1)
+        x = F.relu(self.fc2(F.relu(self.fc1(x)))) # 状态先过两层神经网络，每层后面接 ReLU 激活函数。
+        return F.softmax(self.fc3(x), dim=1) # 最后一层输出动作分数，然后用 softmax 转成概率。
 
 # 全局价值网络(CentralValueNet)
 # 输入: 所有智能体的状态拼接 (team_size * state_dim)
@@ -157,8 +161,8 @@ class CentralValueNet(torch.nn.Module):
 
 
 class MAPPO:
-    def __init__(self, team_size, state_dim, hidden_dim, action_dim,
-                 actor_lr, critic_lr, lmbda, eps, gamma, device):
+    def __init__(self, team_size, state_dim, hidden_dim, action_dim, # 智能体数量,单个智能体观测维度,神经网络隐藏层维度,动作数量
+                 actor_lr, critic_lr, lmbda, eps, gamma, device): # actor 学习率，critic 学习率，GAE 参数 λ，PPO clip 参数 ε，折扣因子 γ，训练设备
         self.team_size = team_size
         self.gamma = gamma
         self.lmbda = lmbda
@@ -172,10 +176,10 @@ class MAPPO:
         # 一个全局critic，输入为所有智能体状态拼接
         self.critic = CentralValueNet(team_size * state_dim, hidden_dim, team_size).to(device)
         self.actor_optimizers = [torch.optim.Adam(actor.parameters(), actor_lr) 
-                                 for actor in self.actors]
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), critic_lr)
+                                 for actor in self.actors] # 给每个 actor 创建一个 Adam 优化器
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), critic_lr) # 给 critic 创建一个 Adam 优化器。
 
-    def save_model(self, path=None):
+    def save_model(self, path=None): # 定义保存模型函数。
         if path is None:
             path = weights_dir
         if not os.path.exists(path):
@@ -184,7 +188,7 @@ class MAPPO:
             torch.save(actor.state_dict(), os.path.join(path, f"actor_{i}.pth"))
         torch.save(self.critic.state_dict(), os.path.join(path, "critic.pth"))
 
-    def load_model(self, path=None):
+    def load_model(self, path=None): # 定义加载模型函数。
         if path is None:
             path = weights_dir
         for i, actor in enumerate(self.actors):
@@ -195,33 +199,34 @@ class MAPPO:
         if os.path.exists(critic_path):
             self.critic.load_state_dict(torch.load(critic_path))
 
-    def take_action(self, state_per_agent):
-        actions = []
-        action_probs = []
-        for i, actor in enumerate(self.actors):
-            s = torch.tensor(np.array([state_per_agent[i]]), dtype=torch.float).to(self.device)
-            probs = actor(s)
-            action_dist = torch.distributions.Categorical(probs)
-            action = action_dist.sample()
-            actions.append(action.item())
-            action_probs.append(probs.detach().cpu().numpy()[0])
-        return actions, action_probs
+    def take_action(self, state_per_agent): # 定义动作采样函数。
+        # 参数 state_per_agent 是一个列表，里面放每个智能体的状态。
+        actions = [] # 每个智能体真正采样出来的动作
+        action_probs = [] # 每个智能体当时的完整动作概率分布
+        for i, actor in enumerate(self.actors): # 遍历每个 actor。
+            s = torch.tensor(np.array([state_per_agent[i]]), dtype=torch.float).to(self.device) # 取出第 i 个智能体的状态，并转成 PyTorch 张量。
+            probs = actor(s) # 把状态输入 actor，得到动作概率。
+            action_dist = torch.distributions.Categorical(probs) # 根据动作概率创建离散分布。
+            action = action_dist.sample() # 从这个分布中采样一个动作。
+            actions.append(action.item()) # 把采样出来的动作转成普通整数，加入 actions 列表。
+            action_probs.append(probs.detach().cpu().numpy()[0]) # 保存的当前完整动作概率分布
+        return actions, action_probs # 返回动作列表和旧概率列表。
 
-    def update(self, transition_dicts, state_dim):
+    def update(self, transition_dicts, state_dim): # 存放轨迹数据的列表，状态维度
         # 拼接所有智能体的数据，用于全局critic
         # 首先统一长度T，假设所有智能体长度相同（因为同步环境步）
-        T = len(transition_dicts[0]['states'])
+        T = len(transition_dicts[0]['states']) # 获取一个 episode 的长度。
         # 将所有智能体在同一时间步的state拼接起来，得到 [T, team_size*state_dim]
-        states_all = []
-        next_states_all = []
+        states_all = [] # 每个时间步所有智能体状态拼接
+        next_states_all = [] #每个时间步所有智能体下一状态拼接
         for t in range(T):
             concat_state = []
             concat_next_state = []
             for i in range(self.team_size):
                 concat_state.append(transition_dicts[i]['states'][t])
-                concat_next_state.append(transition_dicts[i]['next_states'][t])
+                concat_next_state.append(transition_dicts[i]['next_states'][t]) # 取出第 i 个智能体在第 t 个时间步的状态和下一状态。
             states_all.append(np.concatenate(concat_state))
-            next_states_all.append(np.concatenate(concat_next_state))
+            next_states_all.append(np.concatenate(concat_next_state)) # 把多个智能体状态拼成一个长向量。
 
         states_all = torch.tensor(states_all, dtype=torch.float).to(self.device)  # [T, team_size*state_dim]
         next_states_all = torch.tensor(next_states_all, dtype=torch.float).to(self.device) # [T, team_size*state_dim]
@@ -239,35 +244,35 @@ class MAPPO:
 
         # 为每个智能体计算其优势
         advantages = []
-        for i in range(self.team_size):
+        for i in range(self.team_size): # 每个智能体分别计算优势。
             adv_i = compute_advantage(self.gamma, self.lmbda, td_delta[:, i])
             advantages.append(adv_i.to(self.device))  # [T]
 
         # 更新critic
         # critic的loss是所有智能体的均方误差平均
-        critic_loss = F.mse_loss(values, td_target.detach())
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
+        critic_loss = F.mse_loss(values, td_target.detach()) # critic_loss = (当前价值估计 - TD目标)^2 的平均
+        self.critic_optimizer.zero_grad() # 清空 critic 之前残留的梯度。
+        critic_loss.backward() # 对 critic loss 反向传播，计算梯度。
+        self.critic_optimizer.step() # 用 Adam 优化器更新 critic 参数。
 
         # 更新每个智能体的actor
         action_losses = []
         entropies = []
 
-        for i in range(self.team_size):
-            states = torch.tensor(transition_dicts[i]['states'], dtype=torch.float).to(self.device)
-            actions = torch.tensor(transition_dicts[i]['actions']).view(-1, 1).to(self.device)
-            old_probs = torch.tensor(transition_dicts[i]['action_probs'], dtype=torch.float).to(self.device)
+        for i in range(self.team_size): # 每个智能体的 actor 分别更新。
+            states = torch.tensor(transition_dicts[i]['states'], dtype=torch.float).to(self.device) # 取出第 i 个智能体整个 episode 的状态序列。
+            actions = torch.tensor(transition_dicts[i]['actions']).view(-1, 1).to(self.device) # 取出第 i 个智能体整个 episode 执行过的动作。
+            old_probs = torch.tensor(transition_dicts[i]['action_probs'], dtype=torch.float).to(self.device) # 取出采样时旧策略的动作概率分布。
 
-            current_probs = self.actors[i](states) # [T, action_dim]
-            log_probs = torch.log(current_probs.gather(1, actions))
-            old_log_probs = torch.log(old_probs.gather(1, actions)).detach()
+            current_probs = self.actors[i](states) # [T, action_dim] , 用当前 actor 重新计算这些状态下的动作概率。
+            log_probs = torch.log(current_probs.gather(1, actions)) # 从当前概率分布中，取出实际执行过的那个动作的概率，然后取对数。
+            old_log_probs = torch.log(old_probs.gather(1, actions)).detach() # 同样，从旧策略概率中取出实际执行动作的概率，并取对数。
 
-            ratio = torch.exp(log_probs - old_log_probs)
-            surr1 = ratio * advantages[i].unsqueeze(-1)
-            surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantages[i].unsqueeze(-1)
+            ratio = torch.exp(log_probs - old_log_probs) # 计算 PPO 里的概率比值：
+            surr1 = ratio * advantages[i].unsqueeze(-1) # PPO 的第一个 surrogate objective。如果 advantage 是正的，说明这个动作比预期好，那么希望提高它的概率。如果 advantage 是负的，说明这个动作比预期差，那么希望降低它的概率。
+            surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantages[i].unsqueeze(-1) # PPO clip 版本。torch.clamp() 把 ratio 限制在：[1 - eps, 1 + eps]
 
-            action_loss = torch.mean(-torch.min(surr1, surr2))
+            action_loss = torch.mean(-torch.min(surr1, surr2)) # PPO 的 actor loss。最大化
             entropy_val = compute_entropy(current_probs)
 
             self.actor_optimizers[i].zero_grad()
@@ -277,7 +282,7 @@ class MAPPO:
             action_losses.append(action_loss.item())
             entropies.append(entropy_val)
 
-        return np.mean(action_losses), critic_loss.item(), np.mean(entropies)
+        return np.mean(action_losses), critic_loss.item(), np.mean(entropies) # 所有 actor 的平均策略损失,critic 损失,所有 actor 的平均熵
 
 
 # 参数设置
